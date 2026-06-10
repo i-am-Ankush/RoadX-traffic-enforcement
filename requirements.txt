@@ -1,0 +1,11 @@
+flask==3.0.3
+opencv-python-headless==4.10.0.84
+ultralytics==8.2.87
+easyocr==1.7.1
+numpy==1.26.4
+reportlab==4.2.2
+qrcode[pil]==7.4.2
+requests==2.32.3
+python-dotenv==1.0.1
+Pillow==10.4.0
+pyyaml==6.0.2

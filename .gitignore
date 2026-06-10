@@ -1,0 +1,33 @@
+# Environment & secrets
+.env
+*.env
+
+# Database — contains real plate numbers, owner names, fines
+#violations.db
+#*.db
+
+# Generated outputs — large, not needed in source control
+static/screenshots/
+static/challans/
+video_results/
+results/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Models — tracked with Git LFS, not plain Git
+models/*.pt
+
+# OS
+.DS_Store
+Thumbs.db
+
+images/
+results/
+datasets/
+static/challans/
+static/screenshots/
