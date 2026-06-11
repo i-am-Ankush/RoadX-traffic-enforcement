@@ -1,5 +1,6 @@
 flask==3.0.3
 numpy==1.26.4
+scipy==1.11.4
 opencv-python-headless==4.9.0.80
 ultralytics==8.3.0
 easyocr==1.7.1
