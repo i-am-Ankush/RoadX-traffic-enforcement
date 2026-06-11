@@ -43,9 +43,15 @@ ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')
 # without changing the real admin password.
 DEMO_PASSWORD = os.environ.get('DEMO_PASSWORD', '')  # empty = demo button hidden
 
-# HF Spaces / reverse proxy fix — sessions break without this behind nginx proxy
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = False   # HF Spaces terminates TLS at proxy
+# HF Spaces / reverse proxy fix
+# HF Spaces terminates TLS at their nginx proxy — gunicorn sees plain HTTP internally,
+# but the browser always connects over HTTPS. We must therefore set Secure=True (the
+# browser will only send the cookie over HTTPS) and SameSite=None (required when
+# Secure=True on cross-origin proxy hops). ProxyFix trusts exactly one proxy hop so
+# Flask sees the real HTTPS scheme and host, which makes url_for() generate correct
+# https:// URLs for redirects.
+app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+app.config['SESSION_COOKIE_SECURE']   = True
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 from werkzeug.middleware.proxy_fix import ProxyFix
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
