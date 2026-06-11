@@ -1,5 +1,7 @@
 FROM python:3.10-slim
 
+ENV PORT=7860
+
 RUN apt-get update && apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 ffmpeg wget && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -20,5 +22,5 @@ RUN wget -q "https://huggingface.co/i-am-ankush/roadx-models/resolve/main/best.p
     wget -q "https://huggingface.co/i-am-ankush/roadx-models/resolve/main/Plate.pt" -O models/Plate.pt && \
     wget -q "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8s.pt" -O models/yolov8s.pt && \
     ls -lh models/
-RUN python -c "import easyocr; easyocr.Reader(['en'], gpu=False)" 2>&1 | tail -5
-CMD gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+
+CMD gunicorn app:app --bind 0.0.0.0:7860 --workers 1 --threads 4 --timeout 300
