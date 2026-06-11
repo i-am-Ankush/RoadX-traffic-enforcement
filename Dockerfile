@@ -22,6 +22,11 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Debug: print what numpy and opencv actually got installed
+RUN python -c "import numpy; print('numpy:', numpy.__version__)" && \
+    python -c "import cv2; print('cv2:', cv2.__version__)" && \
+    echo "All imports OK"
+
 COPY . .
 RUN mkdir -p static/screenshots static/challans videos
 
