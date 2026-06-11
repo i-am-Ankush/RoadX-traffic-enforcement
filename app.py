@@ -45,7 +45,7 @@ DEMO_PASSWORD = os.environ.get('DEMO_PASSWORD', '')  # empty = demo button hidde
 
 # HF Spaces / reverse proxy fix — sessions break without this behind nginx proxy
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SECURE'] = False   # HF Spaces terminates TLS at proxy
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 from werkzeug.middleware.proxy_fix import ProxyFix
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
@@ -55,8 +55,6 @@ def require_admin(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get('is_admin'):
-            if request.path == '/':
-                return redirect('/citizen')
             return redirect(url_for('login', next=request.path))
         return f(*args, **kwargs)
     return decorated
@@ -229,7 +227,7 @@ init_db()
 traffic_model = YOLO("models/yolov8s.pt")  # upgraded from yolov8n — matches detect_video.py
 helmet_model  = YOLO("models/best.pt")
 plate_model   = YOLO("models/Plate.pt")
-reader        = easyocr.Reader(['en'], gpu=False)
+reader        = easyocr.Reader(['en'], gpu=False, model_storage_directory=os.path.join(BASE_DIR, 'easyocr_models'))
 # Two separate locks so plate OCR (step 4) and traffic+helmet detection (steps 1-2)
 # on different camera threads can overlap instead of queuing behind one lock.
 model_lock    = threading.Lock()  # guards traffic_model + helmet_model
