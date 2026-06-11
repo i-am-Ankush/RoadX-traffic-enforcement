@@ -18,6 +18,7 @@ RUN mkdir -p static/screenshots static/challans videos models
 
 RUN wget -q "https://huggingface.co/i-am-ankush/roadx-models/resolve/main/best.pt" -O models/best.pt && \
     wget -q "https://huggingface.co/i-am-ankush/roadx-models/resolve/main/Plate.pt" -O models/Plate.pt && \
+    wget -q "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8s.pt" -O models/yolov8s.pt && \
     ls -lh models/
 
 CMD gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120

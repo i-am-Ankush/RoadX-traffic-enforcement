@@ -1,3 +1,4 @@
+.venv/
 venv/
 __pycache__/
 *.pyc
@@ -10,6 +11,6 @@ datasets/
 images/
 results/
 video_results/
-videos/
 static/screenshots/
 static/challans/
+models/
