@@ -20,7 +20,7 @@ __pycache__/
 venv/
 
 # Models — tracked with Git LFS, not plain Git
-models/*.pt
+
 
 # OS
 .DS_Store
