@@ -13,15 +13,17 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Install CPU-only PyTorch FIRST before anything else.
-# Default pip torch includes CUDA (~2GB). CPU-only is ~200MB.
-# This alone drops the image from 7GB → ~3GB.
+# Install CPU-only PyTorch FIRST — ~200MB vs 2GB CUDA version
 RUN pip install --no-cache-dir \
     torch==2.2.0+cpu \
     torchvision==0.17.0+cpu \
     --index-url https://download.pytorch.org/whl/cpu
 
-# Now install the rest of the dependencies
+# Pin numpy BEFORE opencv — this is the fix for the multiarray import error
+# torch 2.2 ships with numpy 1.x ABI; opencv must see the same numpy it was built against
+RUN pip install --no-cache-dir "numpy==1.26.4"
+
+# Now install the rest
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -31,4 +33,4 @@ RUN mkdir -p static/screenshots static/challans videos
 
 EXPOSE 5001
 
-CMD ["python", "app.py"]
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:5001", "--workers", "1", "--threads", "4", "--timeout", "120"]
