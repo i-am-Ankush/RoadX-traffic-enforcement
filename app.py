@@ -43,6 +43,13 @@ ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')
 # without changing the real admin password.
 DEMO_PASSWORD = os.environ.get('DEMO_PASSWORD', '')  # empty = demo button hidden
 
+# HF Spaces / reverse proxy fix — sessions break without this behind nginx proxy
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 def require_admin(f):
     """For HTML page routes — redirects to login on no session."""
     @wraps(f)
