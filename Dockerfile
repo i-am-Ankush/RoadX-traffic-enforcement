@@ -21,8 +21,7 @@ RUN pip install --no-cache-dir \
 
 COPY requirements.txt .
 
-# Install everything, then FORCE numpy back down last
-# ultralytics/easyocr pull numpy>=2 which breaks opencv
+# Install everything, then FORCE numpy+opencv back down last
 RUN pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir --force-reinstall "numpy==1.26.4" && \
     pip install --no-cache-dir --force-reinstall "opencv-python-headless==4.9.0.80"
@@ -33,4 +32,5 @@ RUN mkdir -p static/screenshots static/challans videos
 
 EXPOSE 5001
 
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:$PORT", "--workers", "1", "--threads", "4", "--timeout", "120"]
+# Shell form so $PORT expands correctly
+CMD gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
