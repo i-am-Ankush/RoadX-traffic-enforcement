@@ -1,3 +1,12 @@
+---
+title: RoadX Traffic Enforcement
+emoji: ⚡
+colorFrom: cyan
+colorTo: blue
+sdk: docker
+pinned: false
+---
+
 # RoadX — AI Traffic Enforcement System
 
 RoadX is an AI-powered traffic enforcement system that analyzes dashcam or CCTV footage to detect violations, extract vehicle details, and generate challans automatically.
