@@ -18,9 +18,6 @@ COPY . .
 RUN rm -rf .venv venv
 RUN mkdir -p static/screenshots static/challans videos models
 
-RUN wget -q "https://huggingface.co/i-am-ankush/roadx-models/resolve/main/best.pt" -O models/best.pt && \
-    wget -q "https://huggingface.co/i-am-ankush/roadx-models/resolve/main/Plate.pt" -O models/Plate.pt && \
-    wget -q "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8s.pt" -O models/yolov8s.pt && \
-    ls -lh models/
+RUN wget -q "https://huggingface.co/i-am-ankush/roadx-models/resolve/main/best.pt" -O models/best.pt && wget -q "https://huggingface.co/i-am-ankush/roadx-models/resolve/main/Plate.pt" -O models/Plate.pt && wget -q "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8s.pt" -O models/yolov8s.pt && ls -lh models/
 
-CMD gunicorn app:app --bind 0.0.0.0:7860 --workers 1 --threads 4 --timeout 300# proxy fix Thu Jun 11 13:35:13 IST 2026
+CMD gunicorn app:app --bind 0.0.0.0:7860 --workers 1 --threads 4 --timeout 300
