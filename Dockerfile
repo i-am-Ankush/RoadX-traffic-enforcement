@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-RUN apt-get update && apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 ffmpeg git-lfs && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -14,6 +14,13 @@ RUN python -c "import cv2; print('cv2:', cv2.__version__)"
 
 COPY . .
 RUN rm -rf .venv venv
+
+RUN git lfs install && git lfs pull 2>/dev/null || true
+
+RUN ls -lh models/
+RUN test $(wc -c < models/best.pt) -gt 1000000 || (echo "best.pt is an LFS pointer!" && exit 1)
+RUN test $(wc -c < models/Plate.pt) -gt 1000000 || (echo "Plate.pt is an LFS pointer!" && exit 1)
+
 RUN mkdir -p static/screenshots static/challans videos
 
 CMD gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
