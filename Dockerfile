@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-RUN apt-get update && apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 ffmpeg git-lfs && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 ffmpeg wget && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -14,13 +14,17 @@ RUN python -c "import cv2; print('cv2:', cv2.__version__)"
 
 COPY . .
 RUN rm -rf .venv venv
+RUN mkdir -p static/screenshots static/challans videos models
 
-RUN git lfs install && git lfs pull 2>/dev/null || true
+# Download models from Hugging Face at build time
+ARG HF_TOKEN
+RUN wget --header="Authorization: Bearer ${HF_TOKEN}" \
+    "https://huggingface.co/i-am-ankush/roadx-models/resolve/main/best.pt" \
+    -O models/best.pt && \
+    wget --header="Authorization: Bearer ${HF_TOKEN}" \
+    "https://huggingface.co/i-am-ankush/roadx-models/resolve/main/Plate.pt" \
+    -O models/Plate.pt
 
 RUN ls -lh models/
-RUN test $(wc -c < models/best.pt) -gt 1000000 || (echo "best.pt is an LFS pointer!" && exit 1)
-RUN test $(wc -c < models/Plate.pt) -gt 1000000 || (echo "Plate.pt is an LFS pointer!" && exit 1)
-
-RUN mkdir -p static/screenshots static/challans videos
 
 CMD gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
