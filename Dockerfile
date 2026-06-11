@@ -1,4 +1,4 @@
-# RoadX — Dockerfile (Python 3.10 for better numpy/opencv compatibility)
+# RoadX — Dockerfile (Python 3.10)
 FROM python:3.10-slim
 
 RUN apt-get update && apt-get install -y \
@@ -8,7 +8,6 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# CPU-only PyTorch for Python 3.10
 RUN pip install --no-cache-dir \
     torch==2.2.0+cpu torchvision==0.17.0+cpu \
     --index-url https://download.pytorch.org/whl/cpu
@@ -16,12 +15,9 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Verify imports work at build time
-RUN python -c "
-import numpy; print('numpy:', numpy.__version__)
-import cv2; print('cv2:', cv2.__version__)
-print('ALL OK')
-"
+RUN python -c "import numpy; print('numpy:', numpy.__version__)" && \
+    python -c "import cv2; print('cv2:', cv2.__version__)" && \
+    echo "ALL IMPORTS OK"
 
 COPY . .
 RUN rm -rf .venv venv
