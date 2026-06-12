@@ -109,6 +109,7 @@ def init_db():
         challan     TEXT,
         paid        INTEGER DEFAULT 0
     )''')
+    # Visitor log — tracks every unique page visit for portfolio analytics
     c.execute('''CREATE TABLE IF NOT EXISTS visitors (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp  TEXT,
@@ -117,50 +118,7 @@ def init_db():
         referrer   TEXT,
         ua         TEXT
     )''')
-    conn.commit()
-    # Auto-seed demo data if DB is empty (HF Spaces resets filesystem on restart)
-    c.execute("SELECT COUNT(*) FROM violations")
-    if c.fetchone()[0] == 0:
-        _auto_seed(c)
-        conn.commit()
-    conn.close()
-
-
-def _auto_seed(c):
-    """Insert 25 demo violations so dashboard is never empty on a cold start."""
-    import random
-    from datetime import timedelta
-    PLATES = ["KA03MX4521","MH12AB3456","DL09WR6392","TN05AT7024",
-              "KL07CD5678","UP32GH8901","RJ14XY2345","GJ01BC7890",
-              "TS09QR1234","KA01HJ9876"]
-    OWNERS = ["Rajesh Kumar","Priya Sharma","Mohammed Irfan","Sunita Patel",
-              "Amit Verma","Deepa Nair","Suresh Reddy","Anita Joshi",
-              "Vikram Singh","Kavitha Menon"]
-    VIOLS  = [("NO HELMET",1000),("TRIPLE RIDING",1000),("WRONG WAY",5000),
-              ("NO HELMET + TRIPLE RIDING",2000)]
-    VIDEOS = ["dashcam_mg_road.mp4","cctv_silk_board.mp4","dashcam_nh48.mp4"]
-    now    = datetime.now()
-    counts = {}
-    rows   = []
-    for _ in range(25):
-        days  = random.choices([0,1,2,3,4,5,6], weights=[8,6,5,4,3,2,1])[0]
-        ts    = (now - timedelta(days=days)).replace(
-                    hour=random.randint(7,22), minute=random.randint(0,59),
-                    second=random.randint(0,59))
-        idx   = random.randint(0, len(PLATES)-1)
-        plate = PLATES[idx]; owner = OWNERS[idx]
-        viol, base = random.choice(VIOLS)
-        prev  = counts.get(plate, 0); counts[plate] = prev + 1
-        fine  = base * min(prev + 1, 3)
-        paid  = 1 if (days >= 3 and random.random() < 0.45) else 0
-        rows.append((ts.strftime("%Y-%m-%d %H:%M:%S"),
-                     random.choice(VIDEOS), viol, plate, owner, fine, None, None, paid))
-    rows.sort(key=lambda r: r[0])
-    c.executemany(
-        "INSERT INTO violations "
-        "(timestamp,video,violation,plate,owner_name,fine,screenshot,challan,paid) "
-        "VALUES (?,?,?,?,?,?,?,?,?)", rows
-    )
+    conn.commit(); conn.close()
 
 def _log_visitor(page):
     """Log a page visit. Silently swallows errors — never break the app for analytics."""
@@ -520,12 +478,11 @@ def process_frame(frame, state):
 
     # ── Step 5: Draw annotations ───────────────────────────
     output_frame = traffic_results.plot()
-    # For display: suppress NO HELMET if WRONG WAY is also active on this frame
-    # OR if wrong_way_ids is non-empty (bike was recently wrong-way flagged).
-    # This prevents the flicker between WRONG WAY and NO HELMET as the bike
-    # approaches and track history resets.
+    # Only suppress NO HELMET from display when WRONG WAY is actively
+    # detected on THIS frame — not based on persistent wrong_way_seen state
+    # (which would bleed across to unrelated videos in the same session).
     display_violations = list(violations)
-    if state.get("wrong_way_seen", False) or "WRONG WAY" in violations:
+    if "WRONG WAY" in violations:
         display_violations = [v for v in display_violations if v != "NO HELMET"]
     _draw_annotations(output_frame, display_violations, state["cached_plates"],
                       engine.wrong_way_ids, traffic_results, helmet_results,
@@ -651,25 +608,22 @@ def _draw_annotations(frame, violations, cached_plates,
 
 
 def _should_log(state):
-    is_wrong_way   = "WRONG WAY" in state["all_violations_seen"]
-    has_plate      = bool(state["last_good_plate"])
-    # Wait for at least 15 processed frames before logging — ensures all
-    # violations in the same incident are accumulated before committing.
-    # At 5 processed fps this is ~3 seconds of confirmed violation.
-    enough_frames  = state["incident_frame_count"] >= 15
+    if state["logged"]:
+        return False
+    if not state["all_violations_seen"]:
+        return False
+
+    is_wrong_way  = "WRONG WAY" in state["all_violations_seen"]
+    has_plate     = bool(state["last_good_plate"])
+    n             = state["incident_frame_count"]
+
     if is_wrong_way:
-        return (
-            not state["logged"] and
-            state["all_violations_seen"] and
-            enough_frames and
-            (has_plate or state["incident_frame_count"] >= 40)
-        )
-    return (
-        not state["logged"] and
-        state["all_violations_seen"] and
-        enough_frames and
-        has_plate
-    )
+        # Wrong-way bikes approach head-on — plate may never be readable.
+        # Log after 20 confirmed detection frames with or without plate.
+        return n >= 20
+
+    # Normal violations: prefer a confirmed plate, fall back after 30 frames.
+    return has_plate or n >= 30
 
 
 def _log_violation(state_snapshot, output_frame):
@@ -774,26 +728,11 @@ def process_source(cam_id):
         state["running"] = True
         state["error"]   = None
 
-    # For video files: seek forward so we process ~5 frames/sec of video content
-    # but the pipeline runs as fast as the CPU allows — no artificial delay.
-    # For RTSP: process every frame (already real-time).
-    if is_rtsp:
-        seek_step = 0
-    else:
-        video_fps = cap.get(cv2.CAP_PROP_FPS) or 25
-        # Process 1 out of every seek_step frames
-        seek_step = max(1, round(video_fps / 5))
-
-    frame_pos = 0
-
     while not state["stop_event"].is_set():
-        # Seek to next frame to process
-        if seek_step > 1:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
-
         ret, frame = cap.read()
         if not ret:
             if is_rtsp:
+                # RTSP: reconnect on drop
                 cap.release(); time.sleep(2)
                 cap = cv2.VideoCapture(source)
                 if not cap.isOpened():
@@ -801,16 +740,13 @@ def process_source(cam_id):
                     break
                 continue
             else:
+                # Video file ended — stop cleanly, show "completed" frame
                 with state["lock"]:
                     state["running"] = False
                     done_frame = _make_text_frame("Video completed.", source.split('/')[-1], (0, 229, 255))
                     state["frame"]   = done_frame
                 break
 
-        # Advance position for next iteration
-        if seek_step > 1:
-            frame_pos += seek_step
-        
         try:
             output_frame = process_frame(frame, state)
         except Exception as exc:
