@@ -646,22 +646,27 @@ def _draw_annotations(frame, violations, cached_plates,
 
 
 def _should_log(state):
-    is_wrong_way   = "WRONG WAY" in state["all_violations_seen"]
-    ocr_had_chance = state["incident_frame_count"] >= (MIN_VOTES * PLATE_INTERVAL)
-    has_plate      = bool(state["last_good_plate"])
+    is_wrong_way  = "WRONG WAY" in state["all_violations_seen"]
+    has_plate     = bool(state["last_good_plate"])
+    n             = state["incident_frame_count"]
+
     if is_wrong_way:
-        # Wrong-way: prefer a plate. Fall back only after 60 frames so OCR
-        # has had many attempts. Head-on plates are hard — accept UNKNOWN
-        # after enough frames rather than never logging.
+        # Wrong-way: head-on plates are rarely readable.
+        # Log after 60 frames regardless of plate.
         return (
             not state["logged"] and
             state["all_violations_seen"] and
-            (has_plate or (ocr_had_chance and state["incident_frame_count"] >= 60))
+            (has_plate or n >= 60)
         )
+
+    # Normal violations: always wait at least 15 frames so all violations
+    # in the same incident (e.g. NO HELMET + TRIPLE RIDING) have time to
+    # accumulate before logging. Then require a plate, or fall back at 30.
     return (
         not state["logged"] and
         state["all_violations_seen"] and
-        (has_plate or state["incident_frame_count"] >= 25)
+        n >= 15 and
+        (has_plate or n >= 30)
     )
 
 
