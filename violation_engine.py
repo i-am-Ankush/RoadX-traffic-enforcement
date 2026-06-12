@@ -105,17 +105,14 @@ class ViolationEngine:
 
             dy = (cy_hist[-1] - cy_hist[-self.WRONG_WAY_FRAMES]) / self.WRONG_WAY_FRAMES
 
-            # Mode A: cy decreasing fast (dashcam, wrong-way bike approaching)
+            # Mode A: cy decreasing (dashcam wrong-way)
             mode_a = dy < -self.WRONG_WAY_THRESHOLD
 
-            # Mode B: area growing fast (head-on approach, static/front camera)
-            # Guards: 
-            #   1. Threshold raised to 0.14 (was 0.08) — only genuinely approaching bikes
-            #   2. cy must not be increasing — rules out bikes moving away from camera
+            # Mode B: area growing fast (head-on approach, static camera)
             initial_area = area_hist[-self.WRONG_WAY_FRAMES]
             if initial_area > 0:
                 area_growth_rate = (area_hist[-1] - initial_area) / (initial_area * self.WRONG_WAY_FRAMES)
-                mode_b = area_growth_rate > 0.14 and dy <= 0
+                mode_b = area_growth_rate > 0.08
             else:
                 mode_b = False
 
