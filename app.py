@@ -109,7 +109,6 @@ def init_db():
         challan     TEXT,
         paid        INTEGER DEFAULT 0
     )''')
-    # Visitor log — tracks every unique page visit for portfolio analytics
     c.execute('''CREATE TABLE IF NOT EXISTS visitors (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp  TEXT,
@@ -118,7 +117,51 @@ def init_db():
         referrer   TEXT,
         ua         TEXT
     )''')
-    conn.commit(); conn.close()
+    conn.commit()
+
+    # Auto-seed demo data on fresh container (HF Spaces resets filesystem on restart)
+    c.execute("SELECT COUNT(*) FROM violations")
+    if c.fetchone()[0] == 0:
+        _auto_seed(c)
+        conn.commit()
+
+    conn.close()
+
+
+def _auto_seed(c):
+    """Insert demo violations so the dashboard isn't empty on a fresh container."""
+    import random
+    from datetime import timedelta
+    PLATES  = ["KA03MX4521","MH12AB3456","DL09WR6392","TN05AT7024",
+               "KL07CD5678","UP32GH8901","RJ14XY2345","GJ01BC7890",
+               "TS09QR1234","KA01HJ9876"]
+    OWNERS  = ["Rajesh Kumar","Priya Sharma","Mohammed Irfan","Sunita Patel",
+               "Amit Verma","Deepa Nair","Suresh Reddy","Anita Joshi",
+               "Vikram Singh","Kavitha Menon"]
+    VIOLS   = [("NO HELMET",1000),("TRIPLE RIDING",1000),("WRONG WAY",5000),
+               ("NO HELMET + TRIPLE RIDING",2000)]
+    VIDEOS  = ["dashcam_mg_road.mp4","cctv_silk_board.mp4","dashcam_nh48.mp4"]
+    now     = datetime.now()
+    counts  = {}
+    records = []
+    for i in range(25):
+        days  = random.choices([0,1,2,3,4,5,6], weights=[8,6,5,4,3,2,1])[0]
+        ts    = (now - timedelta(days=days)).replace(
+                    hour=random.randint(7,22), minute=random.randint(0,59),
+                    second=random.randint(0,59))
+        idx   = random.randint(0, len(PLATES)-1)
+        plate = PLATES[idx]; owner = OWNERS[idx]
+        viol, base = random.choice(VIOLS)
+        prev  = counts.get(plate, 0); counts[plate] = prev + 1
+        fine  = base * min(prev+1, 3)
+        paid  = 1 if (days >= 3 and random.random() < 0.45) else 0
+        records.append((ts.strftime("%Y-%m-%d %H:%M:%S"),
+                        random.choice(VIDEOS), viol, plate, owner, fine, None, None, paid))
+    records.sort(key=lambda r: r[0])
+    c.executemany(
+        "INSERT INTO violations (timestamp,video,violation,plate,owner_name,fine,screenshot,challan,paid) "
+        "VALUES (?,?,?,?,?,?,?,?,?)", records
+    )
 
 def _log_visitor(page):
     """Log a page visit. Silently swallows errors — never break the app for analytics."""
@@ -566,10 +609,10 @@ def _run_plate_ocr(frame, motorcycle_boxes, state, h_f, w_f):
                     state["plate_history"].pop(0)
         if state["plate_history"]:
             for mc, cnt in Counter(state["plate_history"]).most_common():
-                if cnt < MIN_VOTES or len(mc) < MIN_PLATE_LEN:
-                    break
-                # Only lock in plates starting with a valid Indian state code
-                # Filters ZZ34..., UK14... (UK is valid but UK1405156 fails pattern)
+                if cnt < MIN_VOTES:
+                    break  # sorted descending — nothing below can qualify either
+                if len(mc) < MIN_PLATE_LEN:
+                    continue  # skip short garbage, check next candidate
                 state_code = mc[:2] if len(mc) >= 2 else ""
                 valid_states = {
     'AP','AR','AS','BR','CG','CH','DD','DL','DN','GA','GJ',
@@ -727,6 +770,16 @@ def process_source(cam_id):
         state["running"] = True
         state["error"]   = None
 
+    # Frame skipping for video files — process at ~5 FPS regardless of source FPS.
+    # RTSP streams are real-time so always process every frame.
+    if is_rtsp:
+        skip_n = 1
+    else:
+        video_fps = cap.get(cv2.CAP_PROP_FPS) or 25
+        skip_n = max(1, round(video_fps / 5))
+
+    raw_frame_idx = 0
+
     while not state["stop_event"].is_set():
         ret, frame = cap.read()
         if not ret:
@@ -745,6 +798,10 @@ def process_source(cam_id):
                     done_frame = _make_text_frame("Video completed.", source.split('/')[-1], (0, 229, 255))
                     state["frame"]   = done_frame
                 break
+
+        raw_frame_idx += 1
+        if raw_frame_idx % skip_n != 0:
+            continue  # skip this frame — don't process, don't encode
 
         try:
             output_frame = process_frame(frame, state)
