@@ -109,13 +109,10 @@ class ViolationEngine:
             mode_a = dy < -self.WRONG_WAY_THRESHOLD
 
             # Mode B: area growing fast (head-on approach, static camera)
-            # Guard: dy <= 0 ensures bike is NOT moving away from camera.
-            # Threshold raised 0.08 → 0.20 to avoid false positives on
-            # large nearby bikes (e.g. triple riding filmed from close range).
             initial_area = area_hist[-self.WRONG_WAY_FRAMES]
             if initial_area > 0:
                 area_growth_rate = (area_hist[-1] - initial_area) / (initial_area * self.WRONG_WAY_FRAMES)
-                mode_b = area_growth_rate > 0.20 and dy <= 0
+                mode_b = area_growth_rate > 0.08
             else:
                 mode_b = False
 
