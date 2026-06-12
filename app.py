@@ -109,7 +109,6 @@ def init_db():
         challan     TEXT,
         paid        INTEGER DEFAULT 0
     )''')
-    # Visitor log — tracks every unique page visit for portfolio analytics
     c.execute('''CREATE TABLE IF NOT EXISTS visitors (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp  TEXT,
@@ -118,7 +117,50 @@ def init_db():
         referrer   TEXT,
         ua         TEXT
     )''')
-    conn.commit(); conn.close()
+    conn.commit()
+    # Auto-seed demo data if DB is empty (HF Spaces resets filesystem on restart)
+    c.execute("SELECT COUNT(*) FROM violations")
+    if c.fetchone()[0] == 0:
+        _auto_seed(c)
+        conn.commit()
+    conn.close()
+
+
+def _auto_seed(c):
+    """Insert 25 demo violations so dashboard is never empty on a cold start."""
+    import random
+    from datetime import timedelta
+    PLATES = ["KA03MX4521","MH12AB3456","DL09WR6392","TN05AT7024",
+              "KL07CD5678","UP32GH8901","RJ14XY2345","GJ01BC7890",
+              "TS09QR1234","KA01HJ9876"]
+    OWNERS = ["Rajesh Kumar","Priya Sharma","Mohammed Irfan","Sunita Patel",
+              "Amit Verma","Deepa Nair","Suresh Reddy","Anita Joshi",
+              "Vikram Singh","Kavitha Menon"]
+    VIOLS  = [("NO HELMET",1000),("TRIPLE RIDING",1000),("WRONG WAY",5000),
+              ("NO HELMET + TRIPLE RIDING",2000)]
+    VIDEOS = ["dashcam_mg_road.mp4","cctv_silk_board.mp4","dashcam_nh48.mp4"]
+    now    = datetime.now()
+    counts = {}
+    rows   = []
+    for _ in range(25):
+        days  = random.choices([0,1,2,3,4,5,6], weights=[8,6,5,4,3,2,1])[0]
+        ts    = (now - timedelta(days=days)).replace(
+                    hour=random.randint(7,22), minute=random.randint(0,59),
+                    second=random.randint(0,59))
+        idx   = random.randint(0, len(PLATES)-1)
+        plate = PLATES[idx]; owner = OWNERS[idx]
+        viol, base = random.choice(VIOLS)
+        prev  = counts.get(plate, 0); counts[plate] = prev + 1
+        fine  = base * min(prev + 1, 3)
+        paid  = 1 if (days >= 3 and random.random() < 0.45) else 0
+        rows.append((ts.strftime("%Y-%m-%d %H:%M:%S"),
+                     random.choice(VIDEOS), viol, plate, owner, fine, None, None, paid))
+    rows.sort(key=lambda r: r[0])
+    c.executemany(
+        "INSERT INTO violations "
+        "(timestamp,video,violation,plate,owner_name,fine,screenshot,challan,paid) "
+        "VALUES (?,?,?,?,?,?,?,?,?)", rows
+    )
 
 def _log_visitor(page):
     """Log a page visit. Silently swallows errors — never break the app for analytics."""
@@ -610,18 +652,23 @@ def _draw_annotations(frame, violations, cached_plates,
 
 def _should_log(state):
     is_wrong_way   = "WRONG WAY" in state["all_violations_seen"]
-    ocr_had_chance = state["incident_frame_count"] >= (MIN_VOTES * PLATE_INTERVAL)
     has_plate      = bool(state["last_good_plate"])
+    # Wait for at least 15 processed frames before logging — ensures all
+    # violations in the same incident are accumulated before committing.
+    # At 5 processed fps this is ~3 seconds of confirmed violation.
+    enough_frames  = state["incident_frame_count"] >= 15
     if is_wrong_way:
         return (
             not state["logged"] and
             state["all_violations_seen"] and
-            (has_plate or (ocr_had_chance and state["incident_frame_count"] >= 40))
+            enough_frames and
+            (has_plate or state["incident_frame_count"] >= 40)
         )
     return (
         not state["logged"] and
         state["all_violations_seen"] and
-        (has_plate or state["incident_frame_count"] >= 25)
+        enough_frames and
+        has_plate
     )
 
 
@@ -727,19 +774,23 @@ def process_source(cam_id):
         state["running"] = True
         state["error"]   = None
 
-    # Detect every Nth frame to keep CPU load manageable.
-    # Display EVERY frame so the stream looks smooth (~25fps visual).
-    # RTSP is already real-time so no skipping needed.
+    # For video files: seek forward so we process ~5 frames/sec of video content
+    # but the pipeline runs as fast as the CPU allows — no artificial delay.
+    # For RTSP: process every frame (already real-time).
     if is_rtsp:
-        detect_every = 1
+        seek_step = 0
     else:
-        video_fps    = cap.get(cv2.CAP_PROP_FPS) or 25
-        detect_every = max(1, round(video_fps / 5))  # target ~5 detections/sec
+        video_fps = cap.get(cv2.CAP_PROP_FPS) or 25
+        # Process 1 out of every seek_step frames
+        seek_step = max(1, round(video_fps / 5))
 
-    raw_frame_idx   = 0
-    last_detections = None   # cached output_frame from last detection run
+    frame_pos = 0
 
     while not state["stop_event"].is_set():
+        # Seek to next frame to process
+        if seek_step > 1:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
+
         ret, frame = cap.read()
         if not ret:
             if is_rtsp:
@@ -756,28 +807,15 @@ def process_source(cam_id):
                     state["frame"]   = done_frame
                 break
 
-        raw_frame_idx += 1
-
-        if raw_frame_idx % detect_every == 0:
-            # Run full ML detection on this frame
-            try:
-                output_frame = process_frame(frame, state)
-                last_detections = output_frame
-            except Exception as exc:
-                print(f"  [process_source | {cam_id}] Frame error: {exc}")
-                output_frame = frame  # show raw frame on error
-        else:
-            # Skip detection — draw last known annotations onto current frame
-            if last_detections is not None:
-                # Resize last detection frame to match current frame if needed
-                if last_detections.shape[:2] != frame.shape[:2]:
-                    output_frame = frame
-                else:
-                    # Blend: use the raw current frame but overlay
-                    # the annotation layer from last detection
-                    output_frame = last_detections.copy()
-            else:
-                output_frame = frame  # no detection yet, show raw
+        # Advance position for next iteration
+        if seek_step > 1:
+            frame_pos += seek_step
+        
+        try:
+            output_frame = process_frame(frame, state)
+        except Exception as exc:
+            print(f"  [process_source | {cam_id}] Frame error: {exc}")
+            continue
 
         ret2, buffer = cv2.imencode('.jpg', output_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
         if ret2:
