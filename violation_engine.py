@@ -8,11 +8,12 @@ from collections import defaultdict, deque
 
 class ViolationEngine:
     WRONG_WAY_FRAMES    = 10
-    WRONG_WAY_THRESHOLD = 5
+    WRONG_WAY_THRESHOLD = 8
     EDGE_ZONE           = 0.15
 
     def __init__(self):
         self.track_cy_history   = defaultdict(lambda: deque(maxlen=self.WRONG_WAY_FRAMES + 2))
+        self.track_area_history = defaultdict(lambda: deque(maxlen=self.WRONG_WAY_FRAMES + 2))
         self.wrong_way_ids      = set()
 
     # ── PUBLIC API ────────────────────────────────────────
@@ -70,6 +71,7 @@ class ViolationEngine:
 
     def reset(self):
         self.track_cy_history.clear()
+        self.track_area_history.clear()
         self.wrong_way_ids.clear()
 
     # ── INTERNAL ──────────────────────────────────────────
@@ -87,24 +89,37 @@ class ViolationEngine:
             track_id = box["id"]
             cx       = box["cx"]
             cy       = box["cy"]
+            area     = (box["x2"] - box["x1"]) * (box["y2"] - box["y1"])
 
             if cx < frame_width * self.EDGE_ZONE or cx > frame_width * (1 - self.EDGE_ZONE):
                 self.wrong_way_ids.discard(track_id)
                 continue
 
-            cy_hist = self.track_cy_history[track_id]
+            cy_hist   = self.track_cy_history[track_id]
+            area_hist = self.track_area_history[track_id]
             cy_hist.append(cy)
+            area_hist.append(area)
 
             if len(cy_hist) < self.WRONG_WAY_FRAMES:
                 continue
 
             dy = (cy_hist[-1] - cy_hist[-self.WRONG_WAY_FRAMES]) / self.WRONG_WAY_FRAMES
 
-            # Mode A only: cy decreasing means bike moving UP the frame = approaching
-            # head-on = wrong way. Mode B (area growth) removed — cannot reliably
-            # distinguish a wrong-way bike from a nearby triple-riding bike filmed
-            # from a side/rear angle where area varies naturally.
-            if dy < -self.WRONG_WAY_THRESHOLD:
+            # Mode A: cy decreasing (dashcam wrong-way)
+            mode_a = dy < -self.WRONG_WAY_THRESHOLD
+
+            # Mode B: area growing fast (head-on approach, static camera)
+            # Guard: dy <= 0 ensures bike is NOT moving away from camera.
+            # Threshold raised 0.08 → 0.20 to avoid false positives on
+            # large nearby bikes (e.g. triple riding filmed from close range).
+            initial_area = area_hist[-self.WRONG_WAY_FRAMES]
+            if initial_area > 0:
+                area_growth_rate = (area_hist[-1] - initial_area) / (initial_area * self.WRONG_WAY_FRAMES)
+                mode_b = area_growth_rate > 0.20 and dy <= 0
+            else:
+                mode_b = False
+
+            if mode_a or mode_b:
                 self.wrong_way_ids.add(track_id)
             else:
                 self.wrong_way_ids.discard(track_id)
