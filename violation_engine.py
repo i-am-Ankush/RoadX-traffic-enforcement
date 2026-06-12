@@ -13,6 +13,7 @@ class ViolationEngine:
 
     def __init__(self):
         self.track_cy_history   = defaultdict(lambda: deque(maxlen=self.WRONG_WAY_FRAMES + 2))
+        self.track_area_history = defaultdict(lambda: deque(maxlen=self.WRONG_WAY_FRAMES + 2))
         self.wrong_way_ids      = set()
 
     # ── PUBLIC API ────────────────────────────────────────
@@ -70,6 +71,7 @@ class ViolationEngine:
 
     def reset(self):
         self.track_cy_history.clear()
+        self.track_area_history.clear()
         self.wrong_way_ids.clear()
 
     # ── INTERNAL ──────────────────────────────────────────
@@ -87,26 +89,37 @@ class ViolationEngine:
             track_id = box["id"]
             cx       = box["cx"]
             cy       = box["cy"]
+            area     = (box["x2"] - box["x1"]) * (box["y2"] - box["y1"])
 
             if cx < frame_width * self.EDGE_ZONE or cx > frame_width * (1 - self.EDGE_ZONE):
                 self.wrong_way_ids.discard(track_id)
                 continue
 
             cy_hist   = self.track_cy_history[track_id]
+            area_hist = self.track_area_history[track_id]
             cy_hist.append(cy)
-            area_hist = None  # removed
+            area_hist.append(area)
 
             if len(cy_hist) < self.WRONG_WAY_FRAMES:
                 continue
 
             dy = (cy_hist[-1] - cy_hist[-self.WRONG_WAY_FRAMES]) / self.WRONG_WAY_FRAMES
 
-            # Mode A only: cy decreasing fast = dashcam, wrong-way bike approaching.
-            # Mode B (area growth) removed — caused false positives on triple-riding
-            # bikes that are close to the camera and naturally have variable bbox area.
+            # Mode A: cy decreasing fast (dashcam, wrong-way bike approaching)
             mode_a = dy < -self.WRONG_WAY_THRESHOLD
 
-            if mode_a:
+            # Mode B: area growing fast (head-on approach, static/front camera)
+            # Guards: 
+            #   1. Threshold raised to 0.14 (was 0.08) — only genuinely approaching bikes
+            #   2. cy must not be increasing — rules out bikes moving away from camera
+            initial_area = area_hist[-self.WRONG_WAY_FRAMES]
+            if initial_area > 0:
+                area_growth_rate = (area_hist[-1] - initial_area) / (initial_area * self.WRONG_WAY_FRAMES)
+                mode_b = area_growth_rate > 0.14 and dy <= 0
+            else:
+                mode_b = False
+
+            if mode_a or mode_b:
                 self.wrong_way_ids.add(track_id)
             else:
                 self.wrong_way_ids.discard(track_id)
