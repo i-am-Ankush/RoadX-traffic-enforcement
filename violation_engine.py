@@ -112,7 +112,7 @@ class ViolationEngine:
             initial_area = area_hist[-self.WRONG_WAY_FRAMES]
             if initial_area > 0:
                 area_growth_rate = (area_hist[-1] - initial_area) / (initial_area * self.WRONG_WAY_FRAMES)
-                mode_b = area_growth_rate > 0.08
+                mode_b = area_growth_rate > 0.15
             else:
                 mode_b = False
 
