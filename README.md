@@ -1,32 +1,36 @@
 ---
-title: RoadX Traffic Enforcement
-emoji: ⚡
+title: RoadX
+emoji: 🚦
 colorFrom: blue
-colorTo: indigo
+colorTo: cyan
 sdk: docker
 pinned: false
 ---
 
-# RoadX — AI Traffic Enforcement System
+# ⚡ RoadX — AI Traffic Enforcement System
 
-RoadX is an AI-powered traffic enforcement system that analyzes dashcam or CCTV footage to detect violations, extract vehicle details, and generate challans automatically.
+**RoadX** is an AI-powered traffic enforcement system that analyzes dashcam or RTSP CCTV footage to detect violations, read Indian license plates, look up vehicle owners, generate legal PDF challans, and send notifications — automatically, with no human review.
+
+🔗 **Live Demo:** [i-am-ankush-roadx.hf.space/citizen](https://i-am-ankush-roadx.hf.space/citizen) — public citizen portal
+🔒 **Admin Login:** [i-am-ankush-roadx.hf.space/login](https://i-am-ankush-roadx.hf.space/login)
 
 ---
 
 ## Key Features
 
-- Live RTSP stream and video file processing
-- No helmet detection (Sec 129 MV Act — Rs. 1,000)
-- Triple riding detection (Sec 128 MV Act — Rs. 1,000)
-- Wrong-way driving detection (Sec 184 MV Act — Rs. 5,000)
-- Indian license plate recognition (97.6% precision)
+- Live RTSP stream and video file processing, multi-camera support
+- No helmet detection — Sec 129 MV Act, Rs. 1,000 (20-frame vote window)
+- Triple riding detection — Sec 128 MV Act, Rs. 1,000 (overlap-based, >50% IoU on motorcycle ROI)
+- Wrong-way driving detection — Sec 184 MV Act, Rs. 5,000 (dual-mode ByteTrack trajectory analysis)
+- Indian license plate recognition — 97.6% precision, 95.9% mAP@0.5 (avg across 3 datasets, 438 images)
 - Repeat-offender fine multiplier (1× / 2× / 3×)
-- PDF challan generation with QR payment link
-- Email notifications with retry logic (3 attempts)
+- PDF challan generation with QR payment link (ReportLab)
+- Email notifications with retry logic (3 attempts, 2s delay)
 - Login-protected admin dashboard with live MJPEG feed
-- Public citizen portal — no login required
-- Analytics page with 5 Chart.js charts
-- CSV export, mark-as-paid, multi-camera support
+- Public citizen portal — no login required, masked plate numbers
+- Analytics page with 5 Chart.js charts, 6 KPIs
+- CSV export, mark-as-paid, performance metrics API (`/metrics`)
+- Dockerized — deployed live on Hugging Face Spaces (CPU, 16GB RAM)
 
 ---
 
@@ -42,19 +46,22 @@ plate_ocr.py        — Advanced Indian plate OCR (used by detect_video.py)
 detect.py           — Batch image detection script
 detect_video.py     — Batch video processing script
 evaluate_model.py   — Model evaluation (best.pt + Plate.pt)
-templates/          — Flask HTML templates
+seed_db.py          — Seeds violations.db with demo data
+templates/          — Flask HTML templates (login, dashboard, citizen, analytics)
 static/             — Screenshots, challans
 videos/             — Input video files
-models/             — YOLOv8 weights (tracked with Git LFS)
+models/             — YOLOv8 weights (downloaded at Docker build time)
+Dockerfile          — CPU-only build, pre-downloads models + EasyOCR
+docker-compose.yml  — Local multi-container setup
 ```
 
 ---
 
-## Setup
+## Setup (Local)
 
 ```bash
-git clone https://github.com/i-am-Ankush/RoadX-traffic-enforcement-system.git
-cd RoadX-traffic-enforcement-system
+git clone https://github.com/i-am-Ankush/RoadX-traffic-enforcement.git
+cd RoadX-traffic-enforcement
 
 python -m venv venv
 source venv/bin/activate      # Windows: venv\Scripts\activate
@@ -68,10 +75,12 @@ Create a `.env` file in the project root (never commit this):
 SECRET_KEY=your-random-secret-here
 ADMIN_PASSWORD=your-admin-password
 
+# Optional — one-click demo login (separate from admin password)
+DEMO_PASSWORD=
+
 # Optional — email notifications
 GMAIL_ADDRESS=your@gmail.com
 GMAIL_APP_PASS=your-app-password
-
 CITIZEN_EMAIL=citizen@example.com
 ADMIN_EMAIL=admin@example.com
 
@@ -94,7 +103,7 @@ DEMO_EMAIL=demo@example.com
 python app.py
 ```
 
-Open `http://localhost:5001/citizen` — public citizen portal  
+Open `http://localhost:5001/citizen` — public citizen portal
 Open `http://localhost:5001/login` — admin login (traffic police)
 
 From the admin dashboard, select a video file or enter an RTSP URL and click **▶ ADD**.
@@ -105,8 +114,7 @@ From the admin dashboard, select a video file or enter an RTSP URL and click **�
 python detect_video.py
 ```
 
-Processes all `.mp4 / .avi / .mov / .mkv` files in the `videos/` folder.  
-Annotated output saved to `video_results/`.
+Processes all `.mp4 / .avi / .mov / .mkv` files in the `videos/` folder. Annotated output saved to `video_results/`.
 
 ### Batch image detection
 
@@ -122,20 +130,19 @@ Processes all images in `images/`. Results saved to `results/`.
 python evaluate_model.py
 ```
 
-Runs YOLO `val()` on held-out test splits for `best.pt` and `Plate.pt`.  
-Results saved to `results/model_eval/`.
+Runs YOLO `val()` on held-out test splits for `best.pt` and `Plate.pt`. Results saved to `results/model_eval/`.
 
 ---
 
 ## Models
 
-| Model | Type | Purpose | mAP\@0.5 |
+| Model | Type | Purpose | mAP@0.5 |
 |---|---|---|---|
 | `yolov8s.pt` | COCO pretrained | Vehicle + person detection, ByteTrack | — |
 | `best.pt` | Custom trained | Helmet / no-helmet classification | 76.5% |
-| `Plate.pt` | Custom trained | Indian license plate localisation | 95.9% avg |
+| `Plate.pt` | Custom trained | Indian license plate localisation | 95.9% avg (438 images, 3 datasets) |
 
-Models are tracked with Git LFS — install with `git lfs install` before cloning.
+Models are downloaded automatically at Docker build time from a public Hugging Face model repo — no Git LFS required.
 
 ---
 
@@ -148,11 +155,19 @@ Models are tracked with Git LFS — install with `git lfs install` before clonin
 | Full pipeline | ~235ms → ~4-6 FPS |
 | PDF + email (background thread) | 3-7s — does not block the feed |
 
-**Multi-camera note:** On CPU, each additional camera reduces per-camera FPS proportionally due to the GIL. GPU deployment (e.g. Hugging Face Spaces) gives 5×+ improvement.
+**Multi-camera note:** On CPU, each additional camera reduces per-camera FPS due to the GIL. The deployed version uses frame-skipping to keep video playback smooth on free-tier CPU.
 
 ---
 
-## Docker
+## Deployment
+
+Deployed on **Hugging Face Spaces** (Docker SDK, CPU Basic, 16GB RAM):
+
+- ML models (`yolov8s.pt`, `best.pt`, `Plate.pt`) and EasyOCR weights are downloaded/pre-cached at Docker build time — no runtime download delay
+- SQLite database auto-seeds with demo violations on cold start (container filesystem is ephemeral)
+- Session cookies configured for HF's reverse proxy (`SESSION_COOKIE_SECURE=False`, `ProxyFix`)
+
+### Run locally with Docker
 
 ```bash
 docker-compose up
@@ -165,3 +180,7 @@ Add videos to `./videos/`, set env vars in `.env`. Challans and screenshots pers
 ## Disclaimer
 
 Educational project. Not for production law enforcement use.
+
+---
+
+*Built by Ankush Kumar — NIT Calicut*
