@@ -109,11 +109,19 @@ class ViolationEngine:
             mode_a = dy < -self.WRONG_WAY_THRESHOLD
 
             # Mode B: area growing fast (head-on approach, static camera)
-            # DISABLED — caused false positives on approaching triple-riding bikes
-            # that look visually similar to wrong-way vehicles in trajectory terms.
-            # Re-enable only with a much higher threshold + longer confirmation window
-            # if a static-camera use case is needed.
-            mode_b = False
+            initial_area = area_hist[-self.WRONG_WAY_FRAMES]
+            if initial_area > 0:
+                area_growth_rate = (area_hist[-1] - initial_area) / (initial_area * self.WRONG_WAY_FRAMES)
+                mode_b = area_growth_rate > 0.20
+            else:
+                area_growth_rate = 0.0
+                mode_b = False
+
+            # DEBUG — print real values so thresholds can be tuned from actual
+            # HF Spaces logs instead of guessing. Remove once tuned.
+            print(f"  [WrongWay DEBUG] id={track_id} cy={cy} dy={dy:.2f} "
+                  f"area_growth={area_growth_rate:.3f} mode_a={mode_a} mode_b={mode_b}",
+                  flush=True)
 
             if mode_a or mode_b:
                 self.wrong_way_ids.add(track_id)
