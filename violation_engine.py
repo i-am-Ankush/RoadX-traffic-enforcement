@@ -2,22 +2,22 @@
 RoadX — Violation Engine
 Encapsulates all violation detection logic in one testable class.
 """
- 
+
 from collections import defaultdict, deque
- 
- 
+
+
 class ViolationEngine:
     WRONG_WAY_FRAMES    = 10
-    WRONG_WAY_THRESHOLD = 8
+    WRONG_WAY_THRESHOLD = 5
     EDGE_ZONE           = 0.15
- 
+
     def __init__(self):
         self.track_cy_history   = defaultdict(lambda: deque(maxlen=self.WRONG_WAY_FRAMES + 2))
         self.track_area_history = defaultdict(lambda: deque(maxlen=self.WRONG_WAY_FRAMES + 2))
         self.wrong_way_ids      = set()
- 
+
     # ── PUBLIC API ────────────────────────────────────────
- 
+
     def check(self, traffic_objects, helmet_objects, traffic_boxes, frame_width, frame_height=0):
         self._update_wrong_way(traffic_boxes, frame_width)
         violations = []
@@ -33,14 +33,14 @@ class ViolationEngine:
         if self.check_wrong_way():
             violations.append("WRONG WAY")
         return violations
- 
+
     def check_no_helmet(self, traffic_objects, helmet_objects):
         if "motorcycle" not in traffic_objects:
             return False
         nohelmet_count   = helmet_objects.count("nohelmet")
         confirmed_helmet = helmet_objects.count("helmet")
         return nohelmet_count > 0 and nohelmet_count > confirmed_helmet
- 
+
     def check_triple_riding(self, traffic_objects, person_boxes=None,
                              motorcycle_boxes=None, frame_w=0, frame_h=0):
         if "motorcycle" not in traffic_objects:
@@ -57,7 +57,7 @@ class ViolationEngine:
                         if self._overlap((px1,py1,px2,py2),(ex1,ey1,ex2,ey2)) > 0.30)
             if count >= 3: return True
         return False
- 
+
     @staticmethod
     def _overlap(boxA, boxB):
         ax1,ay1,ax2,ay2=boxA; bx1,by1,bx2,by2=boxB
@@ -65,17 +65,17 @@ class ViolationEngine:
         ix2,iy2=min(ax2,bx2),min(ay2,by2)
         if ix2<=ix1 or iy2<=iy1: return 0.0
         return ((ix2-ix1)*(iy2-iy1))/max((ax2-ax1)*(ay2-ay1),1)
- 
+
     def check_wrong_way(self):
         return len(self.wrong_way_ids) > 0
- 
+
     def reset(self):
         self.track_cy_history.clear()
         self.track_area_history.clear()
         self.wrong_way_ids.clear()
- 
+
     # ── INTERNAL ──────────────────────────────────────────
- 
+
     def _update_wrong_way(self, traffic_boxes, frame_width):
         """
         Dual-mode wrong-way detection:
@@ -85,37 +85,36 @@ class ViolationEngine:
         for box in traffic_boxes:
             if box["label"] != "motorcycle" or box["id"] is None:
                 continue
- 
+
             track_id = box["id"]
             cx       = box["cx"]
             cy       = box["cy"]
             area     = (box["x2"] - box["x1"]) * (box["y2"] - box["y1"])
- 
+
             if cx < frame_width * self.EDGE_ZONE or cx > frame_width * (1 - self.EDGE_ZONE):
                 self.wrong_way_ids.discard(track_id)
                 continue
- 
+
             cy_hist   = self.track_cy_history[track_id]
             area_hist = self.track_area_history[track_id]
             cy_hist.append(cy)
             area_hist.append(area)
- 
+
             if len(cy_hist) < self.WRONG_WAY_FRAMES:
                 continue
- 
+
             dy = (cy_hist[-1] - cy_hist[-self.WRONG_WAY_FRAMES]) / self.WRONG_WAY_FRAMES
- 
+
             # Mode A: cy decreasing (dashcam wrong-way)
             mode_a = dy < -self.WRONG_WAY_THRESHOLD
- 
+
             # Mode B: area growing fast (head-on approach, static camera)
-            initial_area = area_hist[-self.WRONG_WAY_FRAMES]
-            if initial_area > 0:
-                area_growth_rate = (area_hist[-1] - initial_area) / (initial_area * self.WRONG_WAY_FRAMES)
-                mode_b = area_growth_rate > 0.08
-            else:
-                mode_b = False
- 
+            # DISABLED — caused false positives on approaching triple-riding bikes
+            # that look visually similar to wrong-way vehicles in trajectory terms.
+            # Re-enable only with a much higher threshold + longer confirmation window
+            # if a static-camera use case is needed.
+            mode_b = False
+
             if mode_a or mode_b:
                 self.wrong_way_ids.add(track_id)
             else:
