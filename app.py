@@ -195,8 +195,13 @@ def get_visitor_stats():
                      WHERE referrer != '' GROUP BY referrer
                      ORDER BY cnt DESC LIMIT 10""")
         referrers = [{"referrer": r[0][:80], "count": r[1]} for r in c.fetchall()]
+        c.execute("""SELECT timestamp, ip, page, referrer FROM visitors
+                     ORDER BY id DESC LIMIT 50""")
+        recent = [{"timestamp": r[0], "ip": r[1], "page": r[2],
+                   "referrer": r[3][:60]} for r in c.fetchall()]
         return {"total": total, "unique_ips": unique,
-                "by_page": by_page, "daily": daily, "referrers": referrers}
+                "by_page": by_page, "daily": daily, "referrers": referrers,
+                "recent": recent}
     finally:
         conn.close()
 
@@ -659,14 +664,14 @@ def _should_log(state):
             (has_plate or n >= 60)
         )
 
-    # Normal violations: always wait at least 25 frames so all violations
+    # Normal violations: always wait at least 15 frames so all violations
     # in the same incident (e.g. NO HELMET + TRIPLE RIDING) have time to
-    # accumulate before logging. Then require a plate, or fall back at 45.
+    # accumulate before logging. Then require a plate, or fall back at 30.
     return (
         not state["logged"] and
         state["all_violations_seen"] and
-        n >= 25 and
-        (has_plate or n >= 45)
+        n >= 15 and
+        (has_plate or n >= 30)
     )
 
 
@@ -1291,8 +1296,10 @@ def citizen_stats():
 @app.route('/visitors')
 @require_admin
 def visitor_stats():
-    """Who has visited the site — for portfolio analytics."""
-    return jsonify(get_visitor_stats())
+    stats = get_visitor_stats()
+    if session.get('is_demo'):
+        stats.pop('recent', None)
+    return jsonify(stats)
 
 
 if __name__ == '__main__':
