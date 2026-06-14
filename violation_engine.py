@@ -117,12 +117,6 @@ class ViolationEngine:
                 area_growth_rate = 0.0
                 mode_b = False
 
-            # DEBUG — print real values so thresholds can be tuned from actual
-            # HF Spaces logs instead of guessing. Remove once tuned.
-            print(f"  [WrongWay DEBUG] id={track_id} cy={cy} dy={dy:.2f} "
-                  f"area_growth={area_growth_rate:.3f} mode_a={mode_a} mode_b={mode_b}",
-                  flush=True)
-
             if mode_a or mode_b:
                 self.wrong_way_ids.add(track_id)
             else:
