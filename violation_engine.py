@@ -7,7 +7,7 @@ from collections import defaultdict, deque
 
 
 class ViolationEngine:
-    WRONG_WAY_FRAMES    = 10
+    WRONG_WAY_FRAMES    = 5
     WRONG_WAY_THRESHOLD = 5
     EDGE_ZONE           = 0.15
 

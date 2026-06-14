@@ -603,10 +603,10 @@ def _run_plate_ocr(frame, motorcycle_boxes, state, h_f, w_f):
                     state["plate_history"].pop(0)
         if state["plate_history"]:
             for mc, cnt in Counter(state["plate_history"]).most_common():
-                if cnt < MIN_VOTES:
-                    break  # sorted descending — nothing below qualifies either
-                if len(mc) < MIN_PLATE_LEN:
-                    continue  # skip short garbage, check next candidate
+                if cnt < MIN_VOTES or len(mc) < MIN_PLATE_LEN:
+                    break
+                # Only lock in plates starting with a valid Indian state code
+                # Filters ZZ34..., UK14... (UK is valid but UK1405156 fails pattern)
                 state_code = mc[:2] if len(mc) >= 2 else ""
                 valid_states = {
     'AP','AR','AS','BR','CG','CH','DD','DL','DN','GA','GJ',
@@ -616,7 +616,7 @@ def _run_plate_ocr(frame, motorcycle_boxes, state, h_f, w_f):
 }
                 if state_code in valid_states:
                     state["last_good_plate"] = mc
-                    break
+                    break  # take the best valid candidate
         state["cached_plates"] = [
             (px1+cx1, py1+cy1, px2+cx1, py2+cy1, state["last_good_plate"])
         ]
@@ -646,19 +646,27 @@ def _draw_annotations(frame, violations, cached_plates,
 
 
 def _should_log(state):
-    is_wrong_way   = "WRONG WAY" in state["all_violations_seen"]
-    ocr_had_chance = state["incident_frame_count"] >= (MIN_VOTES * PLATE_INTERVAL)
-    has_plate      = bool(state["last_good_plate"])
+    is_wrong_way  = "WRONG WAY" in state["all_violations_seen"]
+    has_plate     = bool(state["last_good_plate"])
+    n             = state["incident_frame_count"]
+
     if is_wrong_way:
+        # Wrong-way: head-on plates are rarely readable.
+        # Log after 60 frames regardless of plate.
         return (
             not state["logged"] and
             state["all_violations_seen"] and
-            (has_plate or (ocr_had_chance and state["incident_frame_count"] >= 40))
+            (has_plate or n >= 60)
         )
+
+    # Normal violations: always wait at least 25 frames so all violations
+    # in the same incident (e.g. NO HELMET + TRIPLE RIDING) have time to
+    # accumulate before logging. Then require a plate, or fall back at 45.
     return (
         not state["logged"] and
         state["all_violations_seen"] and
-        (has_plate or state["incident_frame_count"] >= 25)
+        n >= 25 and
+        (has_plate or n >= 45)
     )
 
 
