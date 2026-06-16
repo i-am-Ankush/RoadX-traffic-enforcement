@@ -11,6 +11,7 @@ pinned: false
 
 **RoadX** is an AI-powered traffic enforcement system that analyzes dashcam or RTSP CCTV footage to detect violations, read Indian license plates, look up vehicle owners, generate legal PDF challans, and send notifications — automatically, with no human review.
 
+🎥 **Demo Video:** [youtu.be/9RPNFYb-rWA](https://youtu.be/9RPNFYb-rWA)
 🔗 **Live Demo:** [i-am-ankush-roadx.hf.space/citizen](https://i-am-ankush-roadx.hf.space/citizen) — public citizen portal
 🔒 **Admin Login:** [i-am-ankush-roadx.hf.space/login](https://i-am-ankush-roadx.hf.space/login)
 
