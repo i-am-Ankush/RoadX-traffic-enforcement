@@ -129,6 +129,15 @@ def read_plate(plate_crop, reader, lock):
     if h < 5 or w < 5:
         return ""
 
+    # Cap width before upscaling — huge crops (e.g. whole motorcycle region)
+    # make EasyOCR spend 3-12s per call. Real plate crops are never >300px wide.
+    MAX_W = 300
+    if w > MAX_W:
+        scale_down = MAX_W / w
+        h = max(1, int(h * scale_down))
+        w = MAX_W
+        plate_crop = cv2.resize(plate_crop, (w, h), interpolation=cv2.INTER_AREA)
+
     # Scale to ~300px wide, cap at 4x
     scale = min(4, max(2, int(300 / max(w, 1))))
     big   = cv2.resize(plate_crop, (w*scale, h*scale), interpolation=cv2.INTER_CUBIC)

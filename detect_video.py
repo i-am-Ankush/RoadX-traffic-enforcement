@@ -9,7 +9,6 @@ import re
 import numpy as np
 import easyocr
 import threading
-from plate_ocr import read_plate as _plate_ocr_read
 from collections import Counter, defaultdict
 from ultralytics import YOLO
 
@@ -25,12 +24,66 @@ output_folder = "video_results"
 os.makedirs(output_folder, exist_ok=True)
 
 # ── WRONG WAY CONFIG ──────────────────────────────────────
-WRONG_WAY_FRAMES    = 10
+WRONG_WAY_FRAMES    = 5
 WRONG_WAY_THRESHOLD = -5
-WRONG_WAY_ZONE      = 0.6
+WRONG_WAY_ZONE      = 0.7
 
-def read_plate(crop):
-    return _plate_ocr_read(crop, _reader, _plate_lock)
+_PLATE_RE = re.compile(r'[A-Z]{2}\d{2}[A-Z]{1,2}\d{4}')
+
+_STATE_FIXES = {
+    'HH':'MH','HM':'MH','IH':'MH','NH':'MH',
+    'EL':'KL','IL':'KL','KI':'KA','TZ':'TN','IK':'UK',
+}
+_VALID_STATES = {
+    'AP','AR','AS','BR','CG','CH','DD','DL','DN','GA','GJ',
+    'HR','HP','JH','JK','KA','KL','LA','LD','MH','ML','MN',
+    'MP','MZ','NL','OD','PB','PY','RJ','SK','TN','TR','TS',
+    'TG','UK','UP','WB','AN'
+}
+
+def _correct_plate(raw):
+    t = re.sub(r'[^A-Z0-9]', '', raw.upper())
+    t = t.replace('IND','').replace('INDIA','').replace('IN','')
+    if len(t) < 4: return t
+    chars = list(t)
+    letter_map = {'0':'O','1':'I','5':'S','8':'B','6':'G','2':'Z'}
+    for i in [0,1]:
+        if i < len(chars) and chars[i].isdigit():
+            chars[i] = letter_map.get(chars[i], chars[i])
+    state = ''.join(chars[:2])
+    if state not in _VALID_STATES and state in _STATE_FIXES:
+        fixed = _STATE_FIXES[state]
+        chars[0], chars[1] = fixed[0], fixed[1]
+    digit_map = {'O':'0','I':'1','S':'5','B':'8','Z':'2','G':'6','A':'4','T':'7','L':'1'}
+    for i in [2,3]:
+        if i < len(chars) and chars[i].isalpha():
+            chars[i] = digit_map.get(chars[i], chars[i])
+    return ''.join(chars)
+
+def read_plate(plate_crop):
+    if plate_crop is None or plate_crop.size == 0: return ""
+    h, w = plate_crop.shape[:2]
+    if h < 5 or w < 5: return ""
+    MAX_W = 300
+    if w > MAX_W:
+        scale_down = MAX_W / w
+        h = max(1, int(h * scale_down)); w = MAX_W
+        plate_crop = cv2.resize(plate_crop, (w, h), interpolation=cv2.INTER_AREA)
+    scale = 3
+    plate_big = cv2.resize(plate_crop, (w*scale, h*scale), interpolation=cv2.INTER_CUBIC)
+    gray  = cv2.cvtColor(plate_big, cv2.COLOR_BGR2GRAY)
+    _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    best = ""
+    for img in [gray, otsu]:
+        try:
+            texts = _reader.readtext(img, detail=0, paragraph=True)
+            cleaned = _correct_plate(" ".join(texts))
+            m = _PLATE_RE.search(cleaned)
+            if m: return m.group()
+            if len(cleaned) > len(best): best = cleaned
+        except Exception:
+            continue
+    return best
 
 PLATE_INTERVAL = 5
 VOTE_WINDOW    = 20
@@ -156,9 +209,12 @@ for video_name in videos:
             x1,y1,x2,y2    = map(int, box.xyxy[0])
             cx              = (x1+x2)//2
             cy              = (y1+y2)//2
-            left_bound      = width  * (0.5 - WRONG_WAY_ZONE/2)
-            right_bound     = width  * (0.5 + WRONG_WAY_ZONE/2)
-            if cx < left_bound or cx > right_bound:
+            # Exclude bikes in outer 15% of frame (entry/exit zones)
+            if cx < width * 0.15 or cx > width * 0.85:
+                wrong_way_ids.discard(track_id); continue
+            # Exclude very small detections (far-away bikes, partial views)
+            area = (x2-x1) * (y2-y1)
+            if area < (width * height * 0.01):
                 wrong_way_ids.discard(track_id); continue
             track_cy_history[track_id].append(cy)
             if len(track_cy_history[track_id]) > WRONG_WAY_FRAMES+2:
@@ -192,6 +248,11 @@ for video_name in videos:
         if triple_riding: violations.append("TRIPLE RIDING")
         if wrong_way_ids: violations.append("WRONG WAY")
 
+        # Suppress NO HELMET when WRONG WAY is active — helmet classifier
+        # is unreliable on front-facing riders coming head-on
+        if "WRONG WAY" in violations and "NO HELMET" in violations:
+            violations.remove("NO HELMET")
+
         for v in violations:
             if v not in violations_found:
                 violations_found.append(v)
@@ -217,7 +278,6 @@ for video_name in videos:
                     px1,py1,px2,py2 = map(int, pb.xyxy[0])
                     pw=px2-px1; ph=py2-py1
                     if ph==0 or (pw/ph)<1.0 or pw>crop_w*0.95: continue
-                    if py1 < crop_h*0.25: continue
                     cands.append((px1,py1,px2,py2,cf))
                 if cands:
                     px1,py1,px2,py2,_ = max(cands, key=lambda c: c[4])
